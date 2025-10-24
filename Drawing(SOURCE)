@@ -1,0 +1,1010 @@
+local TOGGLE_KEY = Enum.KeyCode.RightShift
+local UI_POSITION = UDim2.new(0, 16, 0, 80)
+local UI_SIZE = UDim2.new(0, 560, 0, 580)
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+if not (type(Drawing) == "table" and type(Drawing.new) == "function") then
+    warn("Drawing library not found. This script requires Drawing.new (exploit environment).")
+    return
+end
+
+local Settings = {
+    Enabled = true,
+    ToggleKey = TOGGLE_KEY,
+    TargetMode = "OtherTeamsOnly",
+    ShowBox = true,
+    ShowName = true,
+    ShowDistance = true,
+    ShowHealthBar = true,
+    ShowHealthText = true,
+    ShowTracers = true,
+    ShowSkeleton = false,
+    ShowTools = true,
+    MaxDistance = 1200,
+    FOV = 9999,
+    SmoothMovement = true,
+    SmoothSpeed = 12,
+    FrameSkip = 0,
+    BoxThickness = 1,
+    TextSize = 16,
+    HealthBarWidth = 40,
+    TracerFromBottom = true,
+    ColorEnemy = Color3.fromRGB(255, 80, 80),
+    ColorFriendly = Color3.fromRGB(100, 200, 120),
+    ColorText = Color3.fromRGB(255,255,255),
+    ColorTracer = Color3.fromRGB(200,200,200),
+    Presets = {},
+}
+
+local function clamp(x,a,b)
+    if x<a then return a elseif x>b then return b else return x end
+end
+
+local function lerp(a,b,t)
+    return a + (b-a)*t
+end
+
+local function lerpVec2(a,b,t)
+    return Vector2.new(lerp(a.X,b.X,t), lerp(a.Y,b.Y,t))
+end
+
+local function colorToHex(c)
+    return string.format("#%02X%02X%02X", math.floor(c.R*255), math.floor(c.G*255), math.floor(c.B*255))
+end
+
+local function Create(class, props)
+    local obj = Instance.new(class)
+    if props then
+        for k,v in pairs(props) do
+            if k == "Parent" then
+                obj.Parent = v
+            else
+                pcall(function() obj[k] = v end)
+            end
+        end
+    end
+    return obj
+end
+
+local CoreGui = game:GetService("CoreGui")
+
+local screenGui = Create("ScreenGui", {
+    Parent = CoreGui,
+    Name = "DrawingESP_UI",
+    ResetOnSpawn = false,
+    ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+})
+
+local main = Create("Frame", {
+    Parent = screenGui,
+    Name = "MainFrame",
+    Size = UI_SIZE,
+    Position = UI_POSITION,
+    BackgroundColor3 = Color3.fromRGB(24, 24, 24),
+    BorderSizePixel = 0,
+    Visible = true,
+})
+
+
+local uiCorner = Create("UICorner", {Parent = main, CornerRadius = UDim.new(0,10)})
+
+local title = Create("TextLabel", {
+    Parent = main,
+    Size = UDim2.new(1,0,0,36),
+    BackgroundTransparency = 1,
+    Text = "Drawing ESP — Advanced Controls",
+    TextColor3 = Color3.fromRGB(230,230,230),
+    Font = Enum.Font.GothamBold,
+    TextSize = 18,
+    TextXAlignment = Enum.TextXAlignment.Left,
+    Position = UDim2.new(0,12,0,0),
+})
+
+local subtitle = Create("TextLabel", {
+    Parent = main,
+    Size = UDim2.new(1,-24,0,20),
+    Position = UDim2.new(0,12,0,20),
+    BackgroundTransparency = 1,
+    Text = "Rendering: Drawing | Targets: Players",
+    TextColor3 = Color3.fromRGB(160,160,160),
+    Font = Enum.Font.Gotham,
+    TextSize = 12,
+    TextXAlignment = Enum.TextXAlignment.Left,
+})
+
+local closeBtn = Create("TextButton", {
+    Parent = main, 
+    Size = UDim2.new(0,32,0,24), 
+    Position = UDim2.new(1,-40,0,6), 
+    Text = "X", 
+    BackgroundColor3 = Color3.fromRGB(40,40,40), 
+    TextColor3 = Color3.fromRGB(220,220,220)
+})
+
+local miniBtn = Create("TextButton", {
+    Parent = main, 
+    Size = UDim2.new(0,32,0,24), 
+    Position = UDim2.new(1,-80,0,6), 
+    Text = "-", 
+    BackgroundColor3 = Color3.fromRGB(40,40,40), 
+    TextColor3 = Color3.fromRGB(220,220,220)
+})
+
+Create("UICorner", {Parent = closeBtn, CornerRadius = UDim.new(0,6)})
+Create("UICorner", {Parent = miniBtn, CornerRadius = UDim.new(0,6)})
+
+local content = Create("Frame", {
+    Parent = main, 
+    Size = UDim2.new(1,-24,1,-64), 
+    Position = UDim2.new(0,12,0,44), 
+    BackgroundTransparency = 1
+})
+
+local scrollingFrame = Create("ScrollingFrame", {
+    Parent = content,
+    Size = UDim2.new(1, 0, 1, 0),
+    BackgroundTransparency = 1,
+    ScrollBarThickness = 6,
+    CanvasSize = UDim2.new(0, 0, 0, 800),
+    ScrollingDirection = Enum.ScrollingDirection.Y,
+    VerticalScrollBarInset = Enum.ScrollBarInset.ScrollBar
+})
+
+local leftCol = Create("Frame", {
+    Parent = scrollingFrame, 
+    Size = UDim2.new(0,260,0,400), 
+    BackgroundTransparency = 1
+})
+
+local rightCol = Create("Frame", {
+    Parent = scrollingFrame, 
+    Size = UDim2.new(0,260,0,700), 
+    Position = UDim2.new(0,260,0,0), 
+    BackgroundTransparency = 1
+})
+
+local function makeToggleRow(parent, y, labelText, settingKey)
+    local row = Create("Frame", {
+        Parent = parent, 
+        Size = UDim2.new(1, -12, 0, 28), 
+        Position = UDim2.new(0, 8, 0, y), 
+        BackgroundTransparency = 1
+    })
+    
+    local lab = Create("TextLabel", {
+        Parent = row,
+        Position = UDim2.new(0,0,0,0),
+        Size = UDim2.new(1,-90,1,0),
+        BackgroundTransparency = 1,
+        Text = labelText,
+        TextColor3 = Color3.fromRGB(220,220,220),
+        Font = Enum.Font.Gotham,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+    
+    local btn = Create("TextButton", {
+        Parent = row,
+        Position = UDim2.new(1,-82,0,4),
+        Size = UDim2.new(0,74,1,-8),
+        BackgroundColor3 = Color3.fromRGB(40,40,40),
+        Text = "",
+        TextColor3 = Color3.new(1,1,1)
+    })
+    
+    Create("UICorner", {Parent = btn, CornerRadius = UDim.new(0,6)})
+    
+    local indicator = Create("Frame", {
+        Parent = btn,
+        Size = UDim2.new(0.5, -6, 1, -6),
+        Position = UDim2.new(0,4,0,3),
+        BackgroundColor3 = Color3.fromRGB(180,180,180)
+    })
+    
+    Create("UICorner", {Parent = indicator, CornerRadius = UDim.new(0,6)})
+    
+    local function refresh()
+        if Settings[settingKey] then
+            indicator.Position = UDim2.new(0.5, 4, 0, 3)
+            btn.BackgroundColor3 = Color3.fromRGB(40,120,40)
+        else
+            indicator.Position = UDim2.new(0,4,0,3)
+            btn.BackgroundColor3 = Color3.fromRGB(40,40,40)
+        end
+    end
+    
+    btn.MouseButton1Click:Connect(function()
+        Settings[settingKey] = not Settings[settingKey]
+        refresh()
+    end)
+    
+    refresh()
+    return row, btn
+end
+
+local y = 0
+makeToggleRow(leftCol, y, "Enable ESP", "Enabled"); y = y + 34
+makeToggleRow(leftCol, y, "Show Boxes", "ShowBox"); y = y + 34
+makeToggleRow(leftCol, y, "Show Names", "ShowName"); y = y + 34
+makeToggleRow(leftCol, y, "Show Distance", "ShowDistance"); y = y + 34
+makeToggleRow(leftCol, y, "Show Health Bar", "ShowHealthBar"); y = y + 34
+makeToggleRow(leftCol, y, "Show Health Text", "ShowHealthText"); y = y + 34
+makeToggleRow(leftCol, y, "Show Tracers", "ShowTracers"); y = y + 34
+makeToggleRow(leftCol, y, "Show Skeleton", "ShowSkeleton"); y = y + 34
+makeToggleRow(leftCol, y, "Show Tools", "ShowTools"); y = y + 34
+makeToggleRow(leftCol, y, "Smooth Movement", "SmoothMovement"); y = y + 34
+makeToggleRow(leftCol, y, "Tracer From Bottom", "TracerFromBottom"); y = y + 34
+
+local targetRow = Create("Frame", {
+    Parent = leftCol, 
+    Size = UDim2.new(1,-16,0,36), 
+    Position = UDim2.new(0,8,0,y), 
+    BackgroundTransparency = 1
+})
+
+Create("TextLabel", {
+    Parent = targetRow,
+    Position = UDim2.new(0,0,0,0),
+    Size = UDim2.new(1,-90,1,0),
+    BackgroundTransparency = 1,
+    Text = "Targets",
+    TextColor3 = Color3.fromRGB(220,220,220),
+    Font = Enum.Font.Gotham,
+    TextSize = 14,
+    TextXAlignment = Enum.TextXAlignment.Left
+})
+
+local targetBtn = Create("TextButton", {
+    Parent = targetRow,
+    Position = UDim2.new(1,-82,0,4),
+    Size = UDim2.new(0,74,1,-8),
+    BackgroundColor3 = Color3.fromRGB(40,40,40),
+    Text = "Other Teams",
+    TextColor3 = Color3.fromRGB(220,220,220)
+})
+
+Create("UICorner", {Parent = targetBtn, CornerRadius = UDim.new(0,6)})
+
+local function refreshTargetText()
+    if Settings.TargetMode == "OtherTeamsOnly" then
+        targetBtn.Text = "Other Teams"
+    else
+        targetBtn.Text = "All Players"
+    end
+end
+
+targetBtn.MouseButton1Click:Connect(function()
+    if Settings.TargetMode == "OtherTeamsOnly" then
+        Settings.TargetMode = "AllPlayers"
+    else
+        Settings.TargetMode = "OtherTeamsOnly"
+    end
+    refreshTargetText()
+end)
+
+refreshTargetText()
+y = y + 44
+
+Create("TextLabel", {
+    Parent = rightCol,
+    Position = UDim2.new(0,8,0,0),
+    Size = UDim2.new(1,-16,0,20),
+    BackgroundTransparency = 1,
+    Text = "Colors & Visuals",
+    TextColor3 = Color3.fromRGB(220,220,220),
+    Font = Enum.Font.GothamBold,
+    TextSize = 14,
+    TextXAlignment = Enum.TextXAlignment.Left
+})
+
+local function makeColorPicker(parent, posY, labelText, settingKey, presets)
+    local row = Create("Frame", {
+        Parent = parent, 
+        Size = UDim2.new(1,-16,0,32), 
+        Position = UDim2.new(0,8,0,posY), 
+        BackgroundTransparency = 1
+    })
+    
+    Create("TextLabel", {
+        Parent = row,
+        Position = UDim2.new(0,0,0,0),
+        Size = UDim2.new(0.45,-8,1,0),
+        BackgroundTransparency = 1,
+        Text = labelText,
+        TextColor3 = Color3.fromRGB(220,220,220),
+        Font = Enum.Font.Gotham,
+        TextSize = 14,
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+    
+    local colorSwatch = Create("Frame", {
+        Parent = row,
+        Size = UDim2.new(0,40,0,24),
+        Position = UDim2.new(0.5,0,0,4),
+        BackgroundColor3 = Settings[settingKey] or Color3.new(1,0,0)
+    })
+    
+    Create("UICorner", {Parent = colorSwatch, CornerRadius = UDim.new(0,6)})
+    
+    local editBox = Create("TextBox", {
+        Parent = row,
+        Position = UDim2.new(0.5,50,0,4),
+        Size = UDim2.new(0,140,0,24),
+        Text = colorToHex(Settings[settingKey] or Color3.new(1,0,0)),
+        ClearTextOnFocus = false,
+        PlaceholderText = "#RRGGBB",
+        TextColor3 = Color3.fromRGB(220,220,220),
+        BackgroundColor3 = Color3.fromRGB(36,36,36)
+    })
+    
+    Create("UICorner", {Parent = editBox, CornerRadius = UDim.new(0,6)})
+    
+    local presetFrame = Create("Frame", {
+        Parent = row, 
+        Position = UDim2.new(1,-64,0,4), 
+        Size = UDim2.new(0,56,0,24), 
+        BackgroundTransparency = 1
+    })
+    
+    for i=1,3 do
+        local btn = Create("TextButton", {
+            Parent = presetFrame,
+            Size = UDim2.new(0,16,1,0),
+            Position = UDim2.new(0,(i-1)*18,0,0),
+            Text = "",
+            BackgroundColor3 = presets and presets[i] or Color3.fromRGB(120,120,120)
+        })
+        Create("UICorner", {Parent = btn, CornerRadius = UDim.new(0,6)})
+        
+        btn.MouseButton1Click:Connect(function()
+            Settings[settingKey] = btn.BackgroundColor3
+            colorSwatch.BackgroundColor3 = Settings[settingKey]
+            editBox.Text = colorToHex(Settings[settingKey])
+        end)
+    end
+    
+    editBox.FocusLost:Connect(function(enter)
+        local txt = editBox.Text
+        local r,g,b = txt:match("#?(%x%x)(%x%x)(%x%x)")
+        if r and g and b then
+            local rN = tonumber(r,16)/255
+            local gN = tonumber(g,16)/255
+            local bN = tonumber(b,16)/255
+            local c = Color3.new(rN,gN,bN)
+            Settings[settingKey] = c
+            colorSwatch.BackgroundColor3 = c
+        else
+            editBox.Text = colorToHex(Settings[settingKey])
+        end
+    end)
+    
+    return row
+end
+
+makeColorPicker(rightCol, 28, "Enemy Color", "ColorEnemy", {Color3.fromRGB(255,80,80), Color3.fromRGB(255,160,160), Color3.fromRGB(200,60,60)})
+makeColorPicker(rightCol, 68, "Friendly Color", "ColorFriendly", {Color3.fromRGB(100,200,120), Color3.fromRGB(80,160,80), Color3.fromRGB(60,120,60)})
+makeColorPicker(rightCol, 108, "Text Color", "ColorText", {Color3.fromRGB(255,255,255), Color3.fromRGB(200,200,200), Color3.fromRGB(255,220,120)})
+makeColorPicker(rightCol, 148, "Tracer Color", "ColorTracer", {Color3.fromRGB(200,200,200), Color3.fromRGB(160,160,255), Color3.fromRGB(255,200,0)})
+
+local function makeSlider(parent, posY, labelText, settingKey, minV, maxV, step)
+    local row = Create("Frame", {
+        Parent = parent, 
+        Size = UDim2.new(1,-16,0,44), 
+        Position = UDim2.new(0,8,0,posY), 
+        BackgroundTransparency = 1
+    })
+    
+    Create("TextLabel", {
+        Parent = row,
+        Position = UDim2.new(0,0,0,0),
+        Size = UDim2.new(1,-120,0,18),
+        BackgroundTransparency = 1,
+        Text = labelText,
+        TextColor3 = Color3.fromRGB(220,220,220),
+        Font = Enum.Font.Gotham,
+        TextSize = 13,
+        TextXAlignment = Enum.TextXAlignment.Left
+    })
+    
+    local valueLabel = Create("TextLabel", {
+        Parent = row,
+        Position = UDim2.new(1,-110,0,0),
+        Size = UDim2.new(0,110,0,18),
+        BackgroundTransparency = 1,
+        Text = tostring(Settings[settingKey]),
+        TextColor3 = Color3.fromRGB(200,200,200),
+        Font = Enum.Font.Gotham,
+        TextSize = 12,
+        TextXAlignment = Enum.TextXAlignment.Right
+    })
+    
+    local sliderBg = Create("Frame", {
+        Parent = row,
+        Position = UDim2.new(0,0,0,22),
+        Size = UDim2.new(1,0,0,14),
+        BackgroundColor3 = Color3.fromRGB(40,40,40)
+    })
+    
+    Create("UICorner", {Parent = sliderBg, CornerRadius = UDim.new(0,6)})
+    
+    local sliderFill = Create("Frame", {
+        Parent = sliderBg,
+        Position = UDim2.new((Settings[settingKey]-minV)/(maxV-minV),0,0,0),
+        Size = UDim2.new(0,16,1,0),
+        BackgroundColor3 = Color3.fromRGB(120,120,120)
+    })
+    
+    Create("UICorner", {Parent = sliderFill, CornerRadius = UDim.new(0,6)})
+    
+    local function updateFromX(x)
+        local rel = clamp((x - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
+        local val = minV + rel * (maxV - minV)
+        if step and step > 0 then
+            val = math.floor((val / step) + 0.5) * step
+        end
+        Settings[settingKey] = val
+        valueLabel.Text = tostring(math.floor(val*100)/100)
+        sliderFill.Position = UDim2.new(rel, 0, 0, 0)
+    end
+    
+    sliderBg.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            updateFromX(input.Position.X)
+            local conn
+            conn = UserInputService.InputChanged:Connect(function(inp)
+                if inp.UserInputType == Enum.UserInputType.MouseMovement then
+                    updateFromX(inp.Position.X)
+                end
+            end)
+            UserInputService.InputEnded:Connect(function(inp)
+                if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                    conn:Disconnect()
+                end
+            end)
+        end
+    end)
+    
+    return row
+end
+
+local slidersY = 200
+makeSlider(rightCol, slidersY, "Max Distance (studs)", "MaxDistance", 50, 5000, 10); slidersY = slidersY + 54
+makeSlider(rightCol, slidersY, "Smoothing Speed", "SmoothSpeed", 1, 60, 1); slidersY = slidersY + 54
+makeSlider(rightCol, slidersY, "Text Size", "TextSize", 10, 30, 1); slidersY = slidersY + 54
+makeSlider(rightCol, slidersY, "Health Bar Width", "HealthBarWidth", 8, 120, 1); slidersY = slidersY + 54
+makeSlider(rightCol, slidersY, "Box Thickness", "BoxThickness", 1, 5, 1); slidersY = slidersY + 54
+makeSlider(rightCol, slidersY, "Frame Skip", "FrameSkip", 0, 10, 1); slidersY = slidersY + 54
+
+local keyRow = Create("Frame", {
+    Parent = rightCol, 
+    Size = UDim2.new(1,-16,0,36), 
+    Position = UDim2.new(0,8,0,slidersY), 
+    BackgroundTransparency = 1
+})
+
+Create("TextLabel", {
+    Parent = keyRow,
+    Position = UDim2.new(0,0,0,0),
+    Size = UDim2.new(0.5,-8,1,0),
+    BackgroundTransparency = 1,
+    Text = "Toggle Key",
+    TextColor3 = Color3.fromRGB(220,220,220),
+    Font = Enum.Font.Gotham,
+    TextSize = 14,
+    TextXAlignment = Enum.TextXAlignment.Left
+})
+
+local keyBox = Create("TextButton", {
+    Parent = keyRow,
+    Position = UDim2.new(0.5,0,0,4),
+    Size = UDim2.new(0,160,0,28),
+    BackgroundColor3 = Color3.fromRGB(40,40,40),
+    Text = tostring(Settings.ToggleKey):gsub("Enum.KeyCode.", ""),
+    TextColor3 = Color3.fromRGB(220,220,220)
+})
+
+Create("UICorner", {Parent = keyBox, CornerRadius = UDim.new(0,6)})
+
+keyBox.MouseButton1Click:Connect(function()
+    keyBox.Text = "Press any key..."
+    local conn
+    conn = UserInputService.InputBegan:Connect(function(input, gproc)
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            Settings.ToggleKey = input.KeyCode
+            keyBox.Text = tostring(Settings.ToggleKey):gsub("Enum.KeyCode.", "")
+            conn:Disconnect()
+        end
+    end)
+end)
+
+local presetRow = Create("Frame", {
+    Parent = rightCol, 
+    Size = UDim2.new(1,-16,0,36), 
+    Position = UDim2.new(0,8,0,slidersY+46), 
+    BackgroundTransparency = 1
+})
+
+local presetInput = Create("TextBox", {
+    Parent = presetRow,
+    Position = UDim2.new(0,0,0,4),
+    Size = UDim2.new(0,200,0,28),
+    Text = "",
+    PlaceholderText = "Preset name",
+    ClearTextOnFocus = false,
+    BackgroundColor3 = Color3.fromRGB(36,36,36),
+    TextColor3 = Color3.fromRGB(220,220,220)
+})
+
+Create("UICorner", {Parent = presetInput, CornerRadius = UDim.new(0,6)})
+
+local saveBtn = Create("TextButton", {
+    Parent = presetRow,
+    Position = UDim2.new(0,208,0,4),
+    Size = UDim2.new(0,80,0,28),
+    Text = "Save",
+    BackgroundColor3 = Color3.fromRGB(40,120,40)
+})
+
+local loadBtn = Create("TextButton", {
+    Parent = presetRow,
+    Position = UDim2.new(0,296,0,4),
+    Size = UDim2.new(0,80,0,28),
+    Text = "Load",
+    BackgroundColor3 = Color3.fromRGB(40,40,120)
+})
+
+local deleteBtn = Create("TextButton", {
+    Parent = presetRow,
+    Position = UDim2.new(0,384,0,4),
+    Size = UDim2.new(0,80,0,28),
+    Text = "Delete",
+    BackgroundColor3 = Color3.fromRGB(120,40,40)
+})
+
+Create("UICorner", {Parent = saveBtn, CornerRadius = UDim.new(0,6)})
+Create("UICorner", {Parent = loadBtn, CornerRadius = UDim.new(0,6)})
+Create("UICorner", {Parent = deleteBtn, CornerRadius = UDim.new(0,6)})
+
+saveBtn.MouseButton1Click:Connect(function()
+    local n = tostring(presetInput.Text)
+    if n == "" then return end
+    local copy = {}
+    for k,v in pairs(Settings) do
+        if k ~= "Presets" then
+            copy[k] = v
+        end
+    end
+    Settings.Presets[n] = copy
+end)
+
+loadBtn.MouseButton1Click:Connect(function()
+    local n = tostring(presetInput.Text)
+    local p = Settings.Presets[n]
+    if not p then return end
+    for k,v in pairs(p) do
+        Settings[k] = v
+    end
+    keyBox.Text = tostring(Settings.ToggleKey):gsub("Enum.KeyCode.", "")
+end)
+
+deleteBtn.MouseButton1Click:Connect(function()
+    local n = tostring(presetInput.Text)
+    Settings.Presets[n] = nil
+end)
+
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local dragging = false
+local dragInput, dragStart, startPos
+
+main.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		dragging = true
+		dragStart = UserInputService:GetMouseLocation()
+		startPos = main.Position
+
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+main.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		dragInput = input
+	end
+end)
+
+RunService.Heartbeat:Connect(function()
+	if dragging and dragInput then
+		local delta = UserInputService:GetMouseLocation() - dragStart
+		main.Position = UDim2.new(
+			startPos.X.Scale,
+			startPos.X.Offset + delta.X,
+			startPos.Y.Scale,
+			startPos.Y.Offset + delta.Y
+		)
+	end
+end)
+
+local minimized = false
+miniBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    scrollingFrame.Visible = not minimized
+    main.Size = minimized and UDim2.new(main.Size.X.Scale, main.Size.X.Offset, 0, 40) or UI_SIZE
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    screenGui.Enabled = false
+end)
+local UserInputService = game:GetService("UserInputService")
+local ESPStore = {}
+
+local function createDrawingsFor(player)
+    local d = {}
+    d.Box = Drawing.new("Square")
+    d.Box.Filled = false
+    d.Box.Thickness = Settings.BoxThickness
+    d.Box.Transparency = 1
+    d.Box.Color = Settings.ColorEnemy
+
+    d.Name = Drawing.new("Text")
+    d.Name.Center = true
+    d.Name.Outline = true
+    d.Name.Size = Settings.TextSize
+    d.Name.Color = Settings.ColorText
+    d.Name.Text = player.Name
+
+    d.Tracer = Drawing.new("Line")
+    d.Tracer.Thickness = 1
+    d.Tracer.Transparency = 1
+    d.Tracer.Color = Settings.ColorTracer
+
+    d.HealthBarBG = Drawing.new("Square")
+    d.HealthBarBG.Filled = true
+    d.HealthBarBG.Transparency = 0.6
+    d.HealthBarBG.Color = Color3.fromRGB(30, 30, 30)
+
+    d.HealthBar = Drawing.new("Square")
+    d.HealthBar.Filled = true
+    d.HealthBar.Transparency = 1
+    d.HealthBar.Color = Color3.fromRGB(0, 255, 0)
+
+    d.Skeleton = {}
+    for i = 1, 16 do
+        d.Skeleton[i] = Drawing.new("Line")
+        d.Skeleton[i].Thickness = 1
+        d.Skeleton[i].Transparency = 1
+        d.Skeleton[i].Color = Settings.ColorEnemy
+    end
+
+    d.ToolText = Drawing.new("Text")
+    d.ToolText.Center = true
+    d.ToolText.Outline = true
+    d.ToolText.Size = math.max(12, Settings.TextSize - 2)
+    d.ToolText.Color = Settings.ColorText
+
+    d.lastScreen = Vector2.new(0, 0)
+    d.smoothedScreen = Vector2.new(0, 0)
+
+    ESPStore[player] = d
+    return d
+end
+
+local function removeDrawingsFor(player)
+    local d = ESPStore[player]
+    if not d then return end
+
+    for k, obj in pairs(d) do
+        if type(obj) == "table" then
+            for _, o in pairs(obj) do
+                pcall(function()
+                    if o and o.Remove then o:Remove() end
+                end)
+            end
+        else
+            pcall(function()
+                if obj and obj.Remove then obj:Remove() end
+            end)
+        end
+    end
+    ESPStore[player] = nil
+end
+
+-- 💣 Reset all ESP drawings (your handler only)
+local function resetAllDrawings()
+    for player, _ in pairs(ESPStore) do
+        removeDrawingsFor(player)
+    end
+    ESPStore = {}
+    print("[✅] All ESP drawings deleted.")
+end
+
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.P then
+        resetAllDrawings()
+    end
+end)
+
+local function isTarget(player)
+    if not player or player == LocalPlayer then return false end
+    local char = player.Character
+    if not char then return false end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    
+    if Settings.TargetMode == "OtherTeamsOnly" then
+        if player.Team == LocalPlayer.Team then
+            return false
+        end
+        return true
+    else
+        return true
+    end
+end
+
+local function getPlayerColor(player)
+    if player.Team and LocalPlayer.Team and player.Team == LocalPlayer.Team then
+        return Settings.ColorFriendly
+    else
+        return Settings.ColorEnemy
+    end
+end
+
+for _,p in ipairs(Players:GetPlayers()) do
+    if isTarget(p) then
+        createDrawingsFor(p)
+    end
+end
+
+Players.PlayerAdded:Connect(function(p)
+    if isTarget(p) then
+        createDrawingsFor(p)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    removeDrawingsFor(p)
+end)
+
+local frameCounter = 0
+RunService.RenderStepped:Connect(function(delta)
+    frameCounter = frameCounter + 1
+    if Settings.FrameSkip and Settings.FrameSkip > 0 and (frameCounter % (Settings.FrameSkip + 1) ~= 0) then
+        return
+    end
+    
+    for _,player in ipairs(Players:GetPlayers()) do
+        if not isTarget(player) then
+            removeDrawingsFor(player)
+        else
+            local d = ESPStore[player] or createDrawingsFor(player)
+            local char = player.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            
+            if char and hum and hrp then
+                local worldPos = hrp.Position
+                local screenPos3, onScreen = Camera:WorldToViewportPoint(worldPos)
+                -- FIX: Convert Vector3 to Vector2 properly
+                local screenPos = Vector2.new(screenPos3.X, screenPos3.Y)
+                local dist = (Camera.CFrame.Position - worldPos).Magnitude
+                local inRange = dist <= Settings.MaxDistance
+                
+                if not inRange or not onScreen or not Settings.Enabled then
+                    pcall(function()
+                        d.Box.Visible = false
+                        d.Name.Visible = false
+                        d.Tracer.Visible = false
+                        d.HealthBar.Visible = false
+                        d.HealthBarBG.Visible = false
+                        d.ToolText.Visible = false
+                        for i=1,#d.Skeleton do
+                            d.Skeleton[i].Visible = false
+                        end
+                    end)
+                else
+                    -- smoothing
+                    if Settings.SmoothMovement then
+                        local t = clamp(Settings.SmoothSpeed * delta, 0, 1)
+                        d.smoothedScreen = lerpVec2(d.smoothedScreen, screenPos, t)
+                        d.lastScreen = screenPos
+                    else
+                        d.smoothedScreen = screenPos
+                        d.lastScreen = screenPos
+                    end
+                    
+                    local color = getPlayerColor(player)
+                    
+                    -- BOX
+                    if Settings.ShowBox then
+                        d.Box.Visible = true
+                        d.Box.Color = color
+                        local scale = clamp(1 + (200 / math.max(dist,50)), 0.6, 10)
+                        local w = 50 * scale
+                        local h = 80 * scale
+                        d.Box.Size = Vector2.new(w, h)
+                        d.Box.Position = Vector2.new(d.smoothedScreen.X - w/2, d.smoothedScreen.Y - h/2)
+                        d.Box.Thickness = Settings.BoxThickness
+                    else
+                        d.Box.Visible = false
+                    end
+                    
+                    -- NAME
+                    if Settings.ShowName then
+                        d.Name.Visible = true
+                        d.Name.Text = player.Name
+                        d.Name.Size = Settings.TextSize
+                        d.Name.Position = Vector2.new(d.smoothedScreen.X, d.smoothedScreen.Y - (d.Box.Size and d.Box.Size.Y/2 + 10 or 40))
+                        d.Name.Color = Settings.ColorText
+                    else
+                        d.Name.Visible = false
+                    end
+                    
+                    -- DISTANCE
+                    if Settings.ShowDistance then
+                        d.ToolText.Visible = true
+                        d.ToolText.Text = tostring(math.floor(dist)) .. "m"
+                        d.ToolText.Size = math.max(12, Settings.TextSize - 2)
+                        d.ToolText.Position = Vector2.new(d.smoothedScreen.X, d.smoothedScreen.Y + (d.Box.Size and d.Box.Size.Y/2 + 8 or 40))
+                        d.ToolText.Color = Settings.ColorText
+                    else
+                        if not Settings.ShowTools then
+                            d.ToolText.Visible = false
+                        end
+                    end
+                    
+                    -- TRACER
+                    if Settings.ShowTracers then
+                        d.Tracer.Visible = true
+                        local fromX
+                        if Settings.TracerFromBottom then
+                            fromX = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y)
+                        else
+                            fromX = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+                        end
+                        d.Tracer.From = fromX
+                        d.Tracer.To = Vector2.new(d.smoothedScreen.X, d.smoothedScreen.Y)
+                        d.Tracer.Color = Settings.ColorTracer
+                    else
+                        d.Tracer.Visible = false
+                    end
+                    
+                    -- HEALTH BAR
+                    if Settings.ShowHealthBar and hum then
+                        local maxHealth = hum.MaxHealth > 0 and hum.MaxHealth or 100
+                        local current = hum.Health
+                        local pct = clamp(current / maxHealth, 0, 1)
+                        
+                        d.HealthBarBG.Visible = true
+                        d.HealthBar.Visible = true
+                        
+                        local hbW = Settings.HealthBarWidth
+                        local hbH = 8
+                        local leftX = d.smoothedScreen.X - (d.Box.Size and d.Box.Size.X/2 or 30) - hbW - 6
+                        local topY = d.smoothedScreen.Y - (hbH/2)
+                        
+                        d.HealthBarBG.Position = Vector2.new(leftX, topY)
+                        d.HealthBarBG.Size = Vector2.new(hbW, hbH)
+                        d.HealthBarBG.Color = Color3.fromRGB(30,30,30)
+                        
+                        d.HealthBar.Position = Vector2.new(leftX, topY)
+                        d.HealthBar.Size = Vector2.new(math.max(1, math.floor(hbW * pct)), hbH)
+                        d.HealthBar.Color = Color3.new(1 - pct, pct, 0)
+                    else
+                        d.HealthBar.Visible = false
+                        d.HealthBarBG.Visible = false
+                    end
+                    
+                    -- TOOL NAME display
+                    if Settings.ShowTools then
+                        local toolName = ""
+                        local charTools = {}
+                        for _,child in pairs(player.Character:GetDescendants()) do
+                            if child:IsA("Tool") then
+                                table.insert(charTools, child.Name)
+                            end
+                        end
+                        if #charTools > 0 then
+                            toolName = charTools[1]
+                            d.ToolText.Visible = true
+                            d.ToolText.Text = toolName
+                            d.ToolText.Position = Vector2.new(d.smoothedScreen.X, d.smoothedScreen.Y + (d.Box.Size and d.Box.Size.Y/2 + 22 or 60))
+                        end
+                    end
+                    
+                    -- SKELETON - FIXED: Proper Vector3 to Vector2 conversion
+                    if Settings.ShowSkeleton then
+                        local function getPart(pname)
+                            local part = player.Character and player.Character:FindFirstChild(pname)
+                            return part and part.Position
+                        end
+                        
+                        local HEAD = getPart("Head")
+                        local NECK = getPart("UpperTorso") or getPart("Torso")
+                        local LSH = getPart("LeftUpperArm") or getPart("LeftArm")
+                        local RSH = getPart("RightUpperArm") or getPart("RightArm")
+                        local LEL = getPart("LeftUpperLeg") or getPart("LeftLeg")
+                        local REL = getPart("RightUpperLeg") or getPart("RightLeg")
+                        local LFL = getPart("LeftLowerArm") or getPart("LeftForearm")
+                        local RFL = getPart("RightLowerArm") or getPart("RightForearm")
+                        
+                        local lines = {
+                            {HEAD, NECK},
+                            {NECK, LSH},
+                            {NECK, RSH},
+                            {NECK, LEL},
+                            {NECK, REL},
+                            {LSH, LFL},
+                            {RSH, RFL},
+                        }
+                        
+                        for i,line in ipairs(lines) do
+                            local a,b = line[1], line[2]
+                            local li = d.Skeleton[i]
+                            if a and b then
+                                local aS, onA = Camera:WorldToViewportPoint(a)
+                                local bS, onB = Camera:WorldToViewportPoint(b)
+                                if onA and onB then
+                                    li.Visible = true
+                                    -- FIX: Convert Vector3 to Vector2 properly
+                                    li.From = Vector2.new(aS.X, aS.Y)
+                                    li.To = Vector2.new(bS.X, bS.Y)
+                                    li.Color = color
+                                else
+                                    li.Visible = false
+                                end
+                            else
+                                li.Visible = false
+                            end
+                        end
+                        for i = #lines + 1, #d.Skeleton do
+                            d.Skeleton[i].Visible = false
+                        end
+                    else
+                        for i=1,#d.Skeleton do
+                            d.Skeleton[i].Visible = false
+                        end
+                    end
+                end
+            else
+                removeDrawingsFor(player)
+            end
+        end
+    end
+end)
+
+local function updateUIVisibility()
+    screenGui.Enabled = true
+end
+
+updateUIVisibility()
+
+UserInputService.InputBegan:Connect(function(input, gpe)
+    if input.KeyCode == Settings.ToggleKey then
+        Settings.Enabled = not Settings.Enabled
+    end
+end)
+
+Players.PlayerAdded:Connect(function(p)
+    if isTarget(p) then
+        createDrawingsFor(p)
+    end
+end)
+
+Players.PlayerRemoving:Connect(removeDrawingsFor)
+script.Destroying:Connect(function()
+    for p,_ in pairs(ESPStore) do
+        removeDrawingsFor(p)
+    end
+    screenGui:Destroy()
+end)
